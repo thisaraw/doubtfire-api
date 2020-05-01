@@ -26,7 +26,7 @@ class TeachingPeriodTest < ActiveSupport::TestCase
       # Find the matching teaching period, by id from response
       tp = TeachingPeriod.find(data['id'])
       # Match json with object
-      assert_json_matches_model(data, tp, response_keys)
+      assert_json_matches_model(tp, data, response_keys)
     end
   end
 
@@ -95,13 +95,40 @@ class TeachingPeriodTest < ActiveSupport::TestCase
     # check if the details posted match as expected
     response_keys = %w(period year start_date end_date active_until)
     tp_updated = tp.reload
-    assert_json_matches_model(last_response_body, tp_updated, response_keys)
+    assert_json_matches_model(tp_updated, last_response_body, response_keys)
 
     # check if the details in the replaced teaching period match as data set to replace
     assert_equal data_to_put[:teaching_period]['period'], tp_updated.period
     assert_equal data_to_put[:teaching_period]['active_until'].to_date, tp_updated.active_until.to_date
     assert_equal data_to_put[:teaching_period]['start_date'].to_date, tp_updated.start_date.to_date
     assert_equal data_to_put[:teaching_period]['end_date'].to_date, tp_updated.end_date.to_date
+  end
+  
+  # Put teaching period using unauthorised account
+  def test_student_cannot_put_teaching_period
+    # A user with student role which does not have permission to put a teaching period
+    user = FactoryBot.create(:user, :student)
+
+    # Create a new teaching period
+    teaching_period = FactoryBot.create(:teaching_period)
+
+    # Number of teaching period before put new teaching period
+    number_of_tp = TeachingPeriod.count
+
+    # Create a dummy teaching period 
+    data_to_put = {
+      teaching_period: FactoryBot.build(:teaching_period),
+      auth_token: auth_token
+    }
+
+    # Perform PUT, but the student user does not have permissions to put it
+    put_json "/api/teaching_periods/#{teaching_period.id}", with_auth_token(data_to_put, user)
+
+    # Check if the put does not get through
+    assert_equal 403, last_response.status
+
+    # Check if the number of teaching period is same as initially
+    assert_equal TeachingPeriod.count, number_of_tp
   end
 
   # POST tests
@@ -125,7 +152,7 @@ class TeachingPeriodTest < ActiveSupport::TestCase
     # check if the details posted match as expected
     response_keys = %w(period year start_date end_date active_until)
     teaching_period = TeachingPeriod.find(last_response_body['id'])
-    assert_json_matches_model(last_response_body, teaching_period, response_keys)
+    assert_json_matches_model(teaching_period, last_response_body, response_keys)
 
     # check if the details in the newly created teaching period match as the pre-set data
     assert_equal data_to_post[:teaching_period]['period'], teaching_period.period

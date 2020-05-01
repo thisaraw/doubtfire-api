@@ -53,11 +53,13 @@ FactoryBot.define do
 
     name            { Faker::Lorem.unique.words(2).join(' ') }
     description     { Faker::Lorem.sentence }
-    start_date      { Time.zone.now }
-    end_date        { Time.zone.now + 14.weeks }
+    start_date      { Time.zone.now - 3.weeks }
+    end_date        { Time.zone.now + 14.weeks - 3.weeks }
     teaching_period { nil }
     code            { "SIT#{Faker::Number.unique.number(3)}" }
     active          { true }
+    auto_apply_extension_before_deadline { true }
+    send_notifications { true }
 
     after(:create) do | unit, eval |
       group_sets = eval.group_sets

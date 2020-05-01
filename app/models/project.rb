@@ -37,6 +37,8 @@ class Project < ActiveRecord::Base
   validate :must_be_in_group_tutorials
   validates :grade_rationale, length: { maximum: 4095, allow_blank: true }
 
+  validate :tutorial_enrolment_same_campus
+
   #
   # Permissions around project data
   #
@@ -92,34 +94,39 @@ class Project < ActiveRecord::Base
   end
 
   def enrol_in(tutorial)
-    tutorial_enrolment = existing_enrolment(tutorial)
+    # Check if multiple enrolments changing to a single enrolment - due to no stream.
+    # No need to delete if only 1, as that would be updated as well.
+    if tutorial_enrolments.count > 1 && tutorial.tutorial_stream.nil?
+      # So remove current enrolments
+      tutorial_enrolments.delete_all()
+    end
+
+    tutorial_enrolment = matching_enrolment(tutorial)
     if tutorial_enrolment.nil?
       tutorial_enrolment = TutorialEnrolment.new
       tutorial_enrolment.tutorial = tutorial
-      tutorial_enrolment.tutorial_stream = tutorial.tutorial_stream
       tutorial_enrolment.project = self
       tutorial_enrolment.save!
 
       # add after save to ensure valid tutorial_enrolments
       self.tutorial_enrolments << tutorial_enrolment
-
-      tutorial_enrolment
-    else
+    else # there is an existing enrolment...
       tutorial_enrolment.tutorial = tutorial
-      tutorial_enrolment.tutorial_stream = tutorial.tutorial_stream
-      tutorial_enrolment.save!
-      tutorial_enrolment
+      tutorial_enrolment.update!(tutorial_id: tutorial.id)
     end
+    tutorial_enrolment
+  end
+
+  def enrolled_in?(tutorial)
+    tutorial_enrolments.where(tutorial_id: tutorial.id).count > 0
   end
 
   # Find enrolment in same tutorial stream
-  def existing_enrolment(tutorial)
-    tutorial_enrolments.each do |tutorial_enrolment|
-      if tutorial.tutorial_stream.eql? tutorial_enrolment.tutorial.tutorial_stream or tutorial_enrolment.tutorial.tutorial_stream.nil?
-        return tutorial_enrolment
-      end
-    end
-    nil
+  def matching_enrolment(tutorial)
+    tutorial_enrolments.
+      joins(:tutorial).
+      where('tutorials.tutorial_stream_id = :sid OR tutorials.tutorial_stream_id IS NULL OR :sid IS NULL', sid: tutorial.tutorial_stream_id).
+      first
   end
 
   #
@@ -128,7 +135,7 @@ class Project < ActiveRecord::Base
   def must_be_in_group_tutorials
     groups.each do |g|
       next unless g.limit_members_to_tutorial?
-      next unless tutorial != g.tutorial
+      next if enrolled_in? g.tutorial
       if g.group_set.allow_students_to_manage_groups
         # leave group
         g.remove_member(self)
@@ -136,6 +143,15 @@ class Project < ActiveRecord::Base
         errors.add(:groups, "require you to be in tutorial #{g.tutorial.abbreviation}")
         break
       end
+    end
+  end
+
+  # Check tutorial membership if 
+  def tutorial_enrolment_same_campus
+    return unless campus_id.present? && campus_id_changed?
+    return unless enrolled
+    if tutorial_enrolments.joins(:tutorial).where('tutorials.campus_id <> :cid', cid: campus_id).count > 0
+      errors.add(:campus, "does not match with tutorial enrolments.")
     end
   end
 
@@ -175,7 +191,10 @@ class Project < ActiveRecord::Base
   end
 
   def tutorial_enrolment_for_stream(tutorial_stream)
-    tutorial_enrolments.where(tutorial_stream: tutorial_stream).first || tutorial_enrolments.where(tutorial_stream_id: nil).first
+    tutorial_enrolments.
+      joins(:tutorial).
+      where('tutorials.tutorial_stream_id = :sid OR tutorials.tutorial_stream_id IS NULL', sid: (tutorial_stream.present? ? tutorial_stream.id : nil)).
+      first
   end
 
   def tutorial_for_stream(tutorial_stream)

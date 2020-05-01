@@ -12,12 +12,9 @@ class Group < ActiveRecord::Base
   has_one :tutor, through: :tutorial
 
   validates :name, presence: true, allow_nil: false
-  validates :number, presence: true, allow_nil: false
   validates :group_set, presence: true, allow_nil: false
   validates :tutorial, presence: true, allow_nil: false
   validates_associated :group_memberships
-  validates :number, uniqueness: { scope: :group_set,
-                                 message: 'must be unique within the set of groups' }
   validates :name, uniqueness: { scope: :group_set,
                                  message: 'must be unique within the set of groups' }
   validate :must_be_in_same_tutorial, if: :limit_members_to_tutorial?
@@ -43,20 +40,30 @@ class Group < ActiveRecord::Base
     # What can tutors do with groups?
     tutor_role_permissions = [
       :get_members,
-      :manage_group
+      :manage_group,
+      :move_tutorial
     ]
     # What can convenors do with groups?
     convenor_role_permissions = [
       :get_members,
-      :manage_group
+      :manage_group,
+      :can_exceed_capacity,
+      :move_tutorial
     ]
+    # What can admin do with groups?
+    admin_role_permissions = [
+      :get_members,
+      :manage_group,
+      :can_exceed_capacity,
+      :move_tutorial
+    ]    
     # What can nil users do with groups?
     nil_role_permissions = [
-
     ]
 
     # Return permissions hash
     {
+      admin: admin_role_permissions,
       convenor: convenor_role_permissions,
       tutor: tutor_role_permissions,
       student: student_role_permissions,
@@ -89,6 +96,31 @@ class Group < ActiveRecord::Base
 
   def has_user(user)
     projects.where('user_id = :user_id', user_id: user.id).count == 1
+  end
+
+  def capacity
+    result = group_set.capacity
+    if result.present?
+      result += capacity_adjustment
+    end
+    result
+  end
+
+  def at_capacity?
+    capacity.present? && group_memberships.where(active: true).count >= capacity
+  end
+
+  def switch_to_tutorial tutorial
+    return if tutorial_id == tutorial.id
+    
+    tutorial_id = tutorial.id
+    self.tutorial = tutorial
+    if group_set.keep_groups_in_same_class && has_active_group_members?
+      projects.each do |proj|
+        proj.enrol_in tutorial
+      end
+    end
+    self.save!
   end
 
   def add_member(project)

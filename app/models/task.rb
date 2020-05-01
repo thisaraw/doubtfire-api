@@ -198,8 +198,17 @@ class Task < ActiveRecord::Base
     extension.user = user
     extension.content_type = :extension
     extension.comment = text
-    extension.recipient = project.tutor_for(task_definition)
+    if weeks <= weeks_can_extend
+      extension.recipient = project.tutor_for(task_definition)
+    else
+      extension.recipient = unit.main_convenor_user
+    end
     extension.save!
+
+    if unit.auto_apply_extension_before_deadline && weeks <= weeks_can_extend
+      extension.assess_extension unit.main_convenor_user, true, true
+    end
+
     extension
   end
 
@@ -560,7 +569,7 @@ class Task < ActiveRecord::Base
     task_definition.weighting.to_f
   end
 
-  def add_text_comment(user, text)
+  def add_text_comment(user, text, reply_to_id = nil)
     text.strip!
     return nil if user.nil? || text.nil? || text.empty?
 
@@ -577,6 +586,7 @@ class Task < ActiveRecord::Base
     comment.comment = text
     comment.content_type = :text
     comment.recipient = user == project.student ? project.tutor_for(task_definition) : project.student
+    comment.reply_to_id = reply_to_id
     comment.save!
 
     comment
@@ -624,13 +634,14 @@ class Task < ActiveRecord::Base
     return discussion
   end
 
-  # TODO: Refgactor to attachment comment (with inheritance on model)
-  def add_comment_with_attachment(user, tempfile)
+  # TODO: Refactor to attachment comment (with inheritance on model)
+  def add_comment_with_attachment(user, tempfile, reply_to_id = nil)
     ensured_group_submission if group_task? && group
 
     comment = TaskComment.create
     comment.task = self
     comment.user = user
+    comment.reply_to_id = reply_to_id
     if FileHelper.accept_file(tempfile, "comment attachment audio test", "audio")
       comment.content_type = :audio
     elsif FileHelper.accept_file(tempfile, "comment attachment image test", "image")
@@ -928,7 +939,7 @@ class Task < ActiveRecord::Base
     elsif ['cpp', 'hpp', 'c++', 'h++', 'cc', 'cxx', 'cp'].include?(extn) then 'cpp'
     elsif ['java'].include?(extn) then 'java'
     elsif %w(js json ts).include?(extn) then 'js'
-    elsif ['html'].include?(extn) then 'html'
+    elsif ['html', 'rhtml'].include?(extn) then 'html'
     elsif %w(css scss).include?(extn) then 'css'
     elsif ['rb'].include?(extn) then 'ruby'
     elsif ['coffee'].include?(extn) then 'coffeescript'
@@ -936,8 +947,10 @@ class Task < ActiveRecord::Base
     elsif ['xml'].include?(extn) then 'xml'
     elsif ['sql'].include?(extn) then 'sql'
     elsif ['vb'].include?(extn) then 'vbnet'
-    elsif ['txt'].include?(extn) then 'text'
+    elsif ['txt', 'md', 'rmd', 'rpres'].include?(extn) then 'text'
+    elsif ['tex', 'rnw'].include?(extn) then 'tex'
     elsif ['py'].include?(extn) then 'python'
+    elsif ['r'].include?(extn) then 'r'
     else extn
     end
   end
